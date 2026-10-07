@@ -49,6 +49,59 @@
 
 返回分段、采样率、降采样波形和缺口/质量 issue，供 Vue/ECharts 展示。后端使用磁盘 memmap 和降采样，避免把数 GB 原始波形全部放入响应内存。
 
+每个固定采样率段使用**段内本地时间轴**：`start_seconds` 恒为 0，`end_seconds = samples/sample_rate`，`times` 也是 0 起始；段带 `index`（0..N-1）。因此两个不同采样率段即使显示相同秒数，也靠 `segment index` 区分，绝不跨段定位。前端点击波形得到的坐标就是 `(segment_index, channel, offset_seconds)`。
+
+## 报告波形书签
+
+书签是复核人在**已保存报告**波形上留下的定位标记，不修改原始块、分析指标或质量状态。持久化时绑定：
+
+- `report_id`、`manifest_id`、`manifest_digest`（报告冻结清单摘要）；
+- `segment_index`、`sample_rate`、`channel`、段内 `offset_seconds`；
+- `sample_index`、`chunk_sequence`（原始块序号）、`chunk_sample_offset`、`chunk_sha256`、`object_key`；
+- `bookmark_type`（`anomaly|question|note`）、`note`、`author`。
+
+### `POST /reports/{id}/bookmarks`
+
+```json
+{
+  "segment_index": 1,
+  "channel": "Va",
+  "offset_seconds": 0.02,
+  "bookmark_type": "anomaly",
+  "note": "短时脉冲，怀疑开关动作",
+  "author": "reviewer-zhao"
+}
+```
+
+定位只依据报告内冻结的 `fixed_snapshot.expected_chunks`，按采样率分段（与分析同一规则）。错误显式返回，不静默改指相邻块：
+
+- 422 `bookmark_time_out_of_range`：时间不在该段 `[0, 总样本/采样率)` 内（段末瞬间属于下一段，会被拒绝）；
+- 422 `bookmark_segment_not_found` / `bookmark_channel_not_found` / `invalid_bookmark_type`；
+- 404 `report_not_found`；
+- 409 `bookmark_source_stale`：冻结清单对应原始块缺失、摘要变化或对象存储中不可变对象丢失——此时不允许新建书签。
+
+### `GET /reports/{id}/bookmarks` · `DELETE /reports/{id}/bookmarks/{bookmark_id}`
+
+列出/删除书签。删除只删书签行，报告与原始录波都不受影响。
+
+### `GET /bookmarks/{id}/resolution`
+
+前端书签列表点击后调用，返回对应预览窗口坐标：
+
+```json
+{
+  "manifest_id": "...", "segment_index": 1, "sample_rate": 7000.0,
+  "segment_start_seconds": 0.0, "segment_end_seconds": 0.06,
+  "offset_seconds": 0.02, "channel": "Va",
+  "chunk_sequence": 1, "chunk_sample_offset": 140,
+  "chunk_sha256": "...", "chunk_start_time": "...", "chunk_end_time": "...",
+  "stale": false
+}
+```
+
+若书签绑定的原始块已删除、摘要变化或对象缺失，返回 **409 `bookmark_source_stale`**（`detail.resolution` 含诊断信息），前端必须显式报错而不是跳到错误窗口。
+
+
 ## 标定
 
 ### `POST /calibrations`

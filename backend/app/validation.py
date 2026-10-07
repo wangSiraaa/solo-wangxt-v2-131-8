@@ -256,11 +256,18 @@ def validate_received_chunks(db: Session, manifest: Manifest) -> tuple[bool, lis
                 )
             )
         try:
+            prev_period = 1.0 / float(prev.sample_rate)
             next_interval = (parse_time(item.end_time) - parse_time(item.start_time)).total_seconds() / max(
                 1, item.sample_count - 1
             )
             time_gap = (parse_time(item.start_time) - parse_time(prev.end_time)).total_seconds()
-            if abs(time_gap - next_interval) > TIME_TOLERANCE_SECONDS:
+            # At a rate change the boundary is stamped on the previous block's
+            # clock (its first next-sample instant); validate that first and
+            # only fall back to the new block's own period, matching the
+            # declaration-time rule. Using only the new rate would reject every
+            # legitimate rate change, which must remain a separate segment.
+            candidates = (prev_period, next_interval) if item.sample_rate != prev.sample_rate else (next_interval,)
+            if all(abs(time_gap - candidate) > TIME_TOLERANCE_SECONDS for candidate in candidates):
                 issues.append(
                     add_issue(
                         db,

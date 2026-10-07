@@ -80,8 +80,7 @@ def preview_manifest(
                 raise HTTPException(404, "calibration version not found")
 
         output_segments = []
-        time_cursor = 0.0
-        for segment in segments:
+        for segment_index, segment in enumerate(segments):
             data = segment["data"]
             fs = float(segment["sample_rate"])
             samples = int(data.shape[0])
@@ -96,11 +95,16 @@ def preview_manifest(
                     values = calibrate_series(values, coefficient)
                 decimated.append(values.tolist())
             n = len(decimated[0]) if decimated else 0
-            times = [(time_cursor + duration * index / max(1, n - 1)) for index in range(n)]
+            # Local time axis: every constant-rate segment starts at 0s. This
+            # keeps "the same displayed second" unambiguous across two rate
+            # segments (it resolves via segment index, never via global time),
+            # and matches the bookmark offset_seconds coordinate.
+            times = [(duration * index / max(1, n - 1)) for index in range(n)]
             output_segments.append(
                 {
-                    "start_seconds": time_cursor,
-                    "end_seconds": time_cursor + duration,
+                    "index": segment_index,
+                    "start_seconds": 0.0,
+                    "end_seconds": duration,
                     "sample_rate": fs,
                     "samples": samples,
                     "sequences": [segment["start_sequence"], segment["end_sequence"]],
@@ -112,7 +116,6 @@ def preview_manifest(
                     ],
                 }
             )
-            time_cursor += duration
             data._mmap.close()
 
     return {

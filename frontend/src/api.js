@@ -34,5 +34,11 @@ export const api = {
   cancelTask: (id) => request(`/analysis-tasks/${id}/cancel`, { method: 'POST' }),
   retryTask: (id) => request(`/analysis-tasks/${id}/retry`, { method: 'POST' }),
   reports: (manifestId) => request(`/reports?manifest_id=${encodeURIComponent(manifestId)}`),
-  report: (id) => request(`/reports/${id}`)
+  report: (id) => request(`/reports/${id}`),
+  bookmarks: (reportId) => request(`/reports/${reportId}/bookmarks`),
+  addBookmark: (reportId, payload) =>
+    request(`/reports/${reportId}/bookmarks`, { method: 'POST', body: JSON.stringify(payload) }),
+  deleteBookmark: (reportId, bookmarkId) =>
+    request(`/reports/${reportId}/bookmarks/${bookmarkId}`, { method: 'DELETE' }),
+  resolveBookmark: (id) => request(`/bookmarks/${id}/resolution`)
 }

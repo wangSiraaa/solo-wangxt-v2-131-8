@@ -155,4 +155,59 @@ class RetryOut(BaseModel):
     attempts: int
 
 
+BOOKMARK_TYPES = ("anomaly", "question", "note")
+
+
+class BookmarkCreate(BaseModel):
+    segment_index: int = Field(ge=0)
+    channel: str = Field(min_length=1, max_length=128)
+    # Seconds measured from the start of the constant-rate segment (the same
+    # local time axis shown by the preview); never a global recording time.
+    offset_seconds: float = Field(ge=0.0)
+    bookmark_type: str
+    note: str = Field(min_length=1, max_length=4000)
+    author: str = Field(min_length=1, max_length=128)
+
+
+class BookmarkOut(BaseModel):
+    id: str
+    report_id: str
+    manifest_id: str
+    manifest_digest: str
+    segment_index: int
+    sample_rate: float
+    channel: str
+    offset_seconds: float
+    sample_index: int
+    chunk_sequence: int
+    chunk_sample_offset: int
+    chunk_sha256: str
+    object_key: str
+    bookmark_type: str
+    note: str
+    author: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class BookmarkResolutionOut(BaseModel):
+    bookmark: BookmarkOut
+    manifest_id: str
+    segment_index: int
+    sample_rate: float
+    segment_start_seconds: float
+    segment_end_seconds: float
+    offset_seconds: float
+    channel: str
+    chunk_sequence: int
+    chunk_sample_offset: int
+    chunk_sha256: str
+    chunk_start_time: str
+    chunk_end_time: str
+    stale: bool
+    error_code: str | None = None
+    error_message: str | None = None
+
+
 QualitySeverity = Literal["ok", "warning", "error"]

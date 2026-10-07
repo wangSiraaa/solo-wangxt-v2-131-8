@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .database import init_db
-from .routers import analysis, manifests, preview
+from .routers import analysis, bookmarks, manifests, preview
 
 settings = get_settings()
 app = FastAPI(title="Power Quality Offline Review Platform", version="1.0.0")
@@ -31,3 +31,4 @@ def health():
 app.include_router(manifests.router)
 app.include_router(analysis.router)
 app.include_router(preview.router)
+app.include_router(bookmarks.router)

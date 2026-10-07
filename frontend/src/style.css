@@ -55,3 +55,16 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
 th, td { border-bottom: 1px solid #e5ebf3; padding: 7px; text-align: left; }
 pre { white-space: pre-wrap; max-height: 260px; overflow: auto; background: #0f172a; color: #dbeafe; padding: 12px; border-radius: 8px; }
+.bookmarks { margin: 14px 0; border-top: 1px dashed #d9e2ee; padding-top: 10px; }
+.bookmark-head { display: flex; justify-content: space-between; align-items: center; }
+.bookmark-form { border: 1px solid #cfdced; border-radius: 8px; padding: 10px; margin: 8px 0; background: #f8fbff; }
+.bookmark-form label { display: block; margin: 6px 0; font-size: 13px; }
+.bookmark-form select, .bookmark-form input, .bookmark-form textarea {
+  width: 100%; box-sizing: border-box; margin-top: 3px; padding: 6px 8px;
+  border: 1px solid #c7d3e3; border-radius: 6px; font: inherit;
+}
+.bookmark-row { cursor: pointer; }
+.bookmark-row:hover { background: #f2f8ff; }
+.badge.bookmark-type.anomaly { background: #ffe0e6; color: #a01636; }
+.badge.bookmark-type.question { background: #fff4d6; color: #8a5a00; }
+.badge.bookmark-type.note { background: #e1edff; color: #174c9c; }

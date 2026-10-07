@@ -121,7 +121,7 @@ class AnalysisTask(Base):
 
 class Report(Base):
     __tablename__ = "reports"
-    __table_args__ = (UniqueConstraint("task_id", name="uq_report_task"))
+    __table_args__ = (UniqueConstraint("task_id", name="uq_report_task"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
     task_id: Mapped[str] = mapped_column(ForeignKey("analysis_tasks.id"), nullable=False)
@@ -137,3 +137,32 @@ class Report(Base):
     )
 
     task: Mapped[AnalysisTask] = relationship(back_populates="report")
+
+
+class ReportBookmark(Base):
+    """Reviewer annotation on a saved report's waveform.
+
+    Bookmarks never mutate raw chunks, analysis metrics or quality status; they
+    only bind a report-scoped waveform location (segment/channel/time) back to
+    the frozen manifest summary and the exact immutable raw block sequence.
+    """
+
+    __tablename__ = "report_bookmarks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    report_id: Mapped[str] = mapped_column(ForeignKey("reports.id"), index=True, nullable=False)
+    manifest_id: Mapped[str] = mapped_column(ForeignKey("manifests.id"), index=True, nullable=False)
+    manifest_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    segment_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    sample_rate: Mapped[float] = mapped_column(Float, nullable=False)
+    channel: Mapped[str] = mapped_column(String(128), nullable=False)
+    offset_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    sample_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    chunk_sequence: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    chunk_sample_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    chunk_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    object_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    bookmark_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    note: Mapped[str] = mapped_column(Text, nullable=False)
+    author: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
