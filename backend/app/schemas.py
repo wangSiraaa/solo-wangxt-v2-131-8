@@ -155,4 +155,60 @@ class RetryOut(BaseModel):
     attempts: int
 
 
+BookmarkType = Literal["anomaly", "question", "note", "follow_up"]
+
+
+class BookmarkCreate(BaseModel):
+    # segment_index + offset_seconds are the authoritative anchor; display
+    # seconds are derived server-side so equal display times in different
+    # constant-rate segments can never cross-resolve into the wrong chunk.
+    segment_index: int
+    channel: str = Field(min_length=1, max_length=64)
+    offset_seconds: float
+    sample_rate: float | None = None  # optional guard against a stale client view
+    bookmark_type: BookmarkType = "note"
+    note: str = Field(default="", max_length=2000)
+    author: str = Field(min_length=1, max_length=128)
+
+
+class BookmarkOut(BaseModel):
+    id: str
+    report_id: str
+    manifest_id: str
+    manifest_digest: str
+    segment_index: int
+    sample_rate: float
+    channel: str
+    offset_seconds: float
+    display_seconds: float
+    chunk_sequence: int
+    sample_index: int
+    bookmark_type: str
+    note: str
+    author: str
+    created_at: datetime
+    source_valid: bool | None = None
+    source_error: dict[str, Any] | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class BookmarkLocateOut(BaseModel):
+    bookmark_id: str
+    report_id: str
+    manifest_id: str
+    manifest_digest: str
+    segment_index: int
+    sample_rate: float
+    channel: str
+    offset_seconds: float
+    display_seconds: float
+    segment_display_start: float
+    segment_display_end: float
+    chunk_sequence: int
+    sample_index: int
+    chunk_object_key: str
+    chunk_sha256: str
+
+
 QualitySeverity = Literal["ok", "warning", "error"]

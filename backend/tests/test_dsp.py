@@ -3,6 +3,10 @@ import math
 from app.dsp import analyze_all_segments, analyze_segment, default_params, group_chunks_by_rate
 from tests.synthetic import CHANNELS, coefficients, make_chunks
 
+# Raw blocks are stored as float32; quantization alone contributes ~2e-7
+# absolute error on a 300-unit signal, so assertions use 1e-5 (~3e-8 relative).
+TOL = 1e-5
+
 
 def test_known_harmonics_thd_and_true_rms():
     chunks = make_chunks(sample_chunks=(720,))
@@ -11,13 +15,13 @@ def test_known_harmonics_thd_and_true_rms():
     )
     result = analyze_segment(segment[0]["data"], CHANNELS, 6000.0, coefficients(), default_params())
     va = result["channels"]["Va"]
-    assert abs(va["rms"] - math.sqrt(300**2 + 10**2 + 20**2)) < 1e-7
-    assert abs(va["thd_percent"] - math.sqrt(500) / 3) < 1e-7
+    assert abs(va["rms"] - math.sqrt(300**2 + 10**2 + 20**2)) < TOL
+    assert abs(va["thd_percent"] - math.sqrt(500) / 3) < TOL
     assert result["quality_status"] == "ok"
     harmonic_rms = {item["order"]: item["rms"] for item in va["windows"][0]["harmonics"]}
-    assert abs(harmonic_rms[1] - 300.0) < 1e-7
-    assert abs(harmonic_rms[3] - 10.0) < 1e-7
-    assert abs(harmonic_rms[5] - 20.0) < 1e-7
+    assert abs(harmonic_rms[1] - 300.0) < TOL
+    assert abs(harmonic_rms[3] - 10.0) < TOL
+    assert abs(harmonic_rms[5] - 20.0) < TOL
 
 
 def test_balanced_three_phase_sequence_components():
@@ -28,22 +32,26 @@ def test_balanced_three_phase_sequence_components():
     result = analyze_segment(segment[0]["data"], CHANNELS, 6000.0, coefficients(), default_params())
     seq = result["symmetrical_components"]["voltage"][0]
     assert seq["status"] == "ok"
-    assert abs(seq["positive_rms"] - 300.0) < 1e-7
-    assert seq["negative_rms"] < 1e-9
-    assert abs(seq["zero_rms"]) < 1e-9
-    assert seq["unbalance_percent"] < 1e-9
+    assert abs(seq["positive_rms"] - 300.0) < TOL
+    assert seq["negative_rms"] < TOL
+    assert abs(seq["zero_rms"]) < TOL
+    assert seq["unbalance_percent"] < TOL
 
 
 def test_reversed_polarity_is_negative_sequence():
+    # A 相反相后：Va' = -Va。相量合成（非标量）：
+    #   V1 = (-Va + aVb + a²Vc)/3 = Va/3        -> 正序 100
+    #   V2 = (-Va + a²Vb + aVc)/3 = -2Va/3      -> 负序 200
+    #   V0 = (-Va + Vb + Vc)/3   = -2Va/3      -> 零序 200（Va+Vb+Vc=0）
     chunks = make_chunks(sample_chunks=(720,), reversed_a=True)
     segment = group_chunks_by_rate(
         [{k: v for k, v in chunks[0].items() if k != "raw"}], {0: chunks[0]["raw"]}
     )
     result = analyze_segment(segment[0]["data"], CHANNELS, 6000.0, coefficients(), default_params())
     seq = result["symmetrical_components"]["voltage"][0]
-    assert abs(seq["negative_rms"] - 200.0) < 1e-7
-    assert abs(seq["zero_rms"] - 100.0) < 1e-7
-    assert abs(seq["positive_rms"] - 100.0) < 1e-7
+    assert abs(seq["negative_rms"] - 200.0) < TOL
+    assert abs(seq["zero_rms"] - 200.0) < TOL
+    assert abs(seq["positive_rms"] - 100.0) < TOL
 
 
 def test_sample_rate_change_remains_segmented_warning():

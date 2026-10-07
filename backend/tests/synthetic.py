@@ -8,9 +8,7 @@ import numpy as np
 CHANNELS = ["Va", "Vb", "Vc"]
 
 
-def phase_waveforms(n: int, fs: float = 6000.0, fundamental: float = 50.0, reversed_a: bool = False, saturation: bool = False, channels=None):
-    channels = channels or CHANNELS
-    t = np.arange(n, dtype=np.float64) / fs
+def _waveforms_at(t, fundamental: float = 50.0, reversed_a: bool = False, saturation: bool = False):
     va_amp = -np.sqrt(2.0) * 300.0 if reversed_a else np.sqrt(2.0) * 300.0
     source = {
         "Va": va_amp * np.cos(2 * np.pi * fundamental * t)
@@ -21,6 +19,13 @@ def phase_waveforms(n: int, fs: float = 6000.0, fundamental: float = 50.0, rever
     }
     if saturation:
         source["Va"] = np.clip(source["Va"], -400, 400)
+    return source
+
+
+def phase_waveforms(n: int, fs: float = 6000.0, fundamental: float = 50.0, reversed_a: bool = False, saturation: bool = False, channels=None):
+    channels = channels or CHANNELS
+    t = np.arange(n, dtype=np.float64) / fs
+    source = _waveforms_at(t, fundamental=fundamental, reversed_a=reversed_a, saturation=saturation)
     values = np.column_stack([source[channel] for channel in channels]).astype("<f4")
     return values
 
@@ -77,6 +82,51 @@ def make_rate_change_chunks():
         "raw": raw,
     }
     return [first, second]
+
+
+def make_multi_rate_chunks(specs, channels=None):
+    """Build contiguous chunks from (sample_count, sample_rate) pairs.
+
+    Each chunk starts one sample period (of the previous chunk's rate) after
+    the previous chunk's last sample, satisfying the manifest continuity rules.
+    Waveforms are evaluated at absolute recording time so the physical signal
+    stays phase-continuous across chunk and rate boundaries.
+    """
+    channels = channels or CHANNELS
+    raw_chunks = []
+    byte_offset = 0
+    origin = datetime(2026, 10, 1, tzinfo=None)
+    cursor = origin
+    previous_rate = None
+    for sequence, (count, fs) in enumerate(specs):
+        if previous_rate is not None:
+            cursor = cursor + timedelta(seconds=1 / previous_rate)
+        start_seconds = (cursor - origin).total_seconds()
+        t = start_seconds + np.arange(count, dtype=np.float64) / fs
+        source = _waveforms_at(t)
+        values = np.column_stack([source[channel] for channel in channels]).astype("<f4")
+        raw = values.tobytes()
+        start_time = cursor
+        end_time = start_time + timedelta(seconds=(count - 1) / fs)
+        raw_chunks.append(
+            {
+                "sequence": sequence,
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "byte_offset": byte_offset,
+                "byte_length": len(raw),
+                "sample_count": count,
+                "sample_rate": fs,
+                "channels": channels,
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat(),
+                "encoding": "float32le-interleaved",
+                "raw": raw,
+            }
+        )
+        cursor = end_time
+        previous_rate = fs
+        byte_offset += len(raw)
+    return raw_chunks
 
 
 def create_manifest(client, chunks, name="synthetic", nominal_sample_rate=None):

@@ -87,6 +87,17 @@ def validate_declaration(expected_chunks: list[dict[str, Any]]) -> list[dict[str
     if [item["sequence"] for item in ordered] != list(range(len(ordered))):
         errors.append({"code": "sequence_not_contiguous", "message": "chunk sequences must be 0..N-1"})
 
+    # Overlaps are checked before continuity so the most specific structural
+    # error surfaces first; every violation is still reported, never collapsed.
+    for prev, item in zip(ordered, ordered[1:]):
+        if int(item["byte_offset"]) < int(prev["byte_offset"]) + int(prev["byte_length"]):
+            errors.append(
+                {
+                    "code": "byte_range_overlap",
+                    "sequences": [prev["sequence"], item["sequence"]],
+                }
+            )
+
     prev_end_offset = 0
     for item in ordered:
         if int(item["byte_offset"]) != prev_end_offset:
@@ -99,15 +110,6 @@ def validate_declaration(expected_chunks: list[dict[str, Any]]) -> list[dict[str
                 }
             )
         prev_end_offset = int(item["byte_offset"]) + int(item["byte_length"])
-
-    for prev, item in zip(ordered, ordered[1:]):
-        if int(item["byte_offset"]) < int(prev["byte_offset"]) + int(prev["byte_length"]):
-            errors.append(
-                {
-                    "code": "byte_range_overlap",
-                    "sequences": [prev["sequence"], item["sequence"]],
-                }
-            )
 
     for item in ordered:
         try:
@@ -259,8 +261,18 @@ def validate_received_chunks(db: Session, manifest: Manifest) -> tuple[bool, lis
             next_interval = (parse_time(item.end_time) - parse_time(item.start_time)).total_seconds() / max(
                 1, item.sample_count - 1
             )
+            prev_interval = (parse_time(prev.end_time) - parse_time(prev.start_time)).total_seconds() / max(
+                1, prev.sample_count - 1
+            )
             time_gap = (parse_time(item.start_time) - parse_time(prev.end_time)).total_seconds()
-            if abs(time_gap - next_interval) > TIME_TOLERANCE_SECONDS:
+            # Mirror the declaration check: at a sampling-rate boundary the
+            # first timestamp of the next block may be measured with either
+            # clock, so both one-prev-interval and one-next-interval gaps are
+            # continuous. Same-rate recordings are unaffected (intervals equal).
+            if (
+                abs(time_gap - next_interval) > TIME_TOLERANCE_SECONDS
+                and abs(time_gap - prev_interval) > TIME_TOLERANCE_SECONDS
+            ):
                 issues.append(
                     add_issue(
                         db,

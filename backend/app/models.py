@@ -121,7 +121,7 @@ class AnalysisTask(Base):
 
 class Report(Base):
     __tablename__ = "reports"
-    __table_args__ = (UniqueConstraint("task_id", name="uq_report_task"))
+    __table_args__ = (UniqueConstraint("task_id", name="uq_report_task"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
     task_id: Mapped[str] = mapped_column(ForeignKey("analysis_tasks.id"), nullable=False)
@@ -137,3 +137,39 @@ class Report(Base):
     )
 
     task: Mapped[AnalysisTask] = relationship(back_populates="report")
+    bookmarks: Mapped[list["WaveformBookmark"]] = relationship(
+        back_populates="report", cascade="all, delete-orphan"
+    )
+
+
+class WaveformBookmark(Base):
+    """Reviewer annotation anchored to a frozen report segment/channel/time.
+
+    The anchor is (segment_index, offset_seconds) resolved against the report's
+    frozen manifest snapshot into (chunk_sequence, sample_index). display_seconds
+    is a derived convenience for the preview axis only; it is never used to
+    locate raw data, so two constant-rate segments sharing a display second
+    cannot cross-resolve into the wrong chunk. manifest_id is deliberately not
+    a foreign key: a bookmark must survive source loss so that locating it can
+    fail with an explicit "source invalid" error instead of vanishing silently.
+    """
+
+    __tablename__ = "waveform_bookmarks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    report_id: Mapped[str] = mapped_column(ForeignKey("reports.id", ondelete="CASCADE"), index=True, nullable=False)
+    manifest_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    manifest_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    segment_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    sample_rate: Mapped[float] = mapped_column(Float, nullable=False)
+    channel: Mapped[str] = mapped_column(String(64), nullable=False)
+    offset_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    display_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    chunk_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    sample_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    bookmark_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    author: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    report: Mapped[Report] = relationship(back_populates="bookmarks")

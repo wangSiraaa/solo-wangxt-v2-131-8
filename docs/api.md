@@ -94,3 +94,45 @@
 - `published`：正常发布；
 - `needs_review`：标定后来更新，需要复核；
 - `diagnostic_failed`：分析有 error 阶段，保留诊断但不是完成报告。
+
+## 报告波形书签
+
+复核人员在波形上留标记，可回到原始数据。书签锚定 `(segment_index, offset_seconds)`，
+服务端按报告冻结快照重放与预览一致的分段语义，解析出 `(chunk_sequence, sample_index)` 并绑定
+`report_id + manifest_digest`。显示秒只是派生值，不作为定位依据，因此两个采样率段即使
+显示秒相同也不会串到错误块。书签不改原始块、计算指标或质量状态。
+
+### `POST /reports/{report_id}/bookmarks`
+
+```json
+{
+  "segment_index": 1,
+  "channel": "Va",
+  "offset_seconds": 0.01,
+  "sample_rate": 7000,
+  "bookmark_type": "anomaly",
+  "note": "短时跌落",
+  "author": "张工"
+}
+```
+
+- `sample_rate` 为可选守卫：与冻结段采样率不一致返回 422 `bookmark_sample_rate_mismatch`，防止过期视图错锚。
+- `bookmark_type`：`anomaly | question | note | follow_up`。
+- 显式错误（均带 `detail.code`）：`bookmark_segment_invalid`、`bookmark_channel_invalid`、
+  `bookmark_time_out_of_range`（越界时间）、`bookmark_source_invalid`（409，来源已失效）、
+  `report_not_found`（404）。
+
+### `GET /reports/{report_id}/bookmarks`
+
+按显示秒排序返回书签，每条带 `source_valid` 与 `source_error`；失效来源显式标注而不是静默丢弃。
+
+### `GET /waveform-bookmarks/{id}/locate`
+
+解析回预览窗口与原始块：`segment_index`、`display_seconds`、`segment_display_start/end`、
+`chunk_sequence`、`sample_index`、`chunk_object_key`、`chunk_sha256`。
+来源失效返回 409 `bookmark_source_invalid`，`reason` 区分
+`report_missing | manifest_missing | manifest_digest_changed | chunk_missing | chunk_digest_changed`。
+
+### `DELETE /waveform-bookmarks/{id}`
+
+只删除书签行（204）；报告、指标、质量状态、块元数据与原始对象均不受影响。

@@ -48,7 +48,7 @@
         </div>
 
         <h3>波形（按固定采样率分段，不做插值拼接）</h3>
-        <WaveformChart :preview="preview" />
+        <WaveformChart :preview="preview" :bookmarks="bookmarks" :focus="waveformFocus" />
 
         <h3>分析任务</h3>
         <div style="margin-bottom:10px">
@@ -93,6 +93,57 @@
           <pre>{{ JSON.stringify(qualitySummary, null, 2) }}</pre>
         </template>
         <p v-else class="meta">尚无已发布报告。失败任务只保存阶段诊断，不会冒充完成。</p>
+
+        <template v-if="reportId">
+          <h3>报告书签（锚定原始块，可回到波形窗口）</h3>
+          <div class="bookmark-form">
+            <label>采样率段
+              <select v-model.number="bookmarkForm.segment_index">
+                <option v-for="(seg, i) in preview.segments || []" :key="i" :value="i">
+                  #{{ i }} · {{ seg.sample_rate }} Hz · {{ (seg.end_seconds - seg.start_seconds).toFixed(4) }}s
+                </option>
+              </select>
+            </label>
+            <label>通道
+              <select v-model="bookmarkForm.channel">
+                <option v-for="c in manifest.channel_set" :key="c" :value="c">{{ c }}</option>
+              </select>
+            </label>
+            <label>段内秒（0 ~ {{ segmentDuration(bookmarkForm.segment_index) }}）
+              <input type="number" v-model.number="bookmarkForm.offset_seconds" step="0.000001" min="0" :max="segmentDuration(bookmarkForm.segment_index)">
+            </label>
+            <label>类型
+              <select v-model="bookmarkForm.bookmark_type">
+                <option v-for="(label, value) in TYPE_LABELS" :key="value" :value="value">{{ label }}</option>
+              </select>
+            </label>
+            <label>署名 <input v-model.trim="bookmarkForm.author" placeholder="复核人"></label>
+            <label>备注 <input v-model="bookmarkForm.note" placeholder="短时异常描述"></label>
+            <button @click="createBookmark" :disabled="!bookmarkForm.author">添加书签</button>
+          </div>
+          <div v-if="bookmarkError" class="issue error"><strong>{{ bookmarkError }}</strong></div>
+          <table v-if="bookmarks.length">
+            <thead><tr><th>类型</th><th>通道</th><th>段 / 采样率</th><th>段内秒</th><th>显示秒</th><th>原始块</th><th>署名</th><th>备注</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr v-for="b in bookmarks" :key="b.id" :class="{ invalid: b.source_valid === false }">
+                <td>{{ typeLabel(b.bookmark_type) }}</td>
+                <td>{{ b.channel }}</td>
+                <td>#{{ b.segment_index }} · {{ b.sample_rate }} Hz</td>
+                <td>{{ b.offset_seconds.toFixed(6) }}</td>
+                <td>{{ b.display_seconds.toFixed(6) }}</td>
+                <td>块 {{ b.chunk_sequence }} · 样本 {{ b.sample_index }}</td>
+                <td>{{ b.author }}</td>
+                <td>{{ b.note }}</td>
+                <td>
+                  <button @click="jumpToBookmark(b)">定位</button>
+                  <button class="danger" @click="removeBookmark(b)">删除</button>
+                  <div v-if="b.source_valid === false" class="meta">来源失效：{{ b.source_error?.message }}</div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else class="meta">尚无书签。书签只记录位置与备注，不修改原始块、计算指标或质量状态。</p>
+        </template>
       </main>
     </div>
   </div>
@@ -117,6 +168,34 @@ const reports = ref([])
 const reportId = ref(null)
 const report = ref(null)
 const timer = ref(null)
+const bookmarks = ref([])
+const bookmarkError = ref('')
+const waveformFocus = ref(null)
+const TYPE_LABELS = { anomaly: '异常', question: '疑问', note: '备注', follow_up: '待复查' }
+const typeLabel = (value) => TYPE_LABELS[value] || value
+const bookmarkForm = ref({
+  segment_index: 0,
+  channel: '',
+  offset_seconds: 0,
+  bookmark_type: 'anomaly',
+  note: '',
+  author: ''
+})
+
+const segmentDuration = (index) => {
+  const segment = (preview.value.segments || [])[index]
+  return segment ? +(segment.end_seconds - segment.start_seconds).toFixed(6) : 0
+}
+
+const parseError = (error) => {
+  try {
+    const data = JSON.parse(error.message)
+    const detail = data?.detail
+    if (typeof detail === 'string') return detail
+    if (detail?.message) return `[${detail.code}] ${detail.message}`
+    return error.message
+  } catch { return String(error.message || error) }
+}
 
 const short = (value) => value ? `${String(value).slice(0, 8)}…` : '—'
 const unwrap = async (promise) => {
@@ -152,11 +231,41 @@ async function loadDetail() {
   const chosen = reports.value.find((item) => item.status === 'published') || reports.value[0]
   reportId.value = chosen?.id || null
   report.value = chosen || null
+  await loadBookmarks()
   const calList = await unwrap(api.calibrations(manifest.value.channel_set_hash))
   calibrations.value = calList || []
   if (!selectedCalibrationId.value) {
     selectedCalibrationId.value = calibrations.value.find((item) => item.status === 'active')?.id || calibrations.value[0]?.id || ''
   }
+  if (!bookmarkForm.value.channel) {
+    bookmarkForm.value.channel = manifest.value.channel_set[0] || ''
+  }
+}
+async function loadBookmarks() {
+  bookmarks.value = reportId.value ? (await unwrap(api.bookmarks(reportId.value))) || [] : []
+}
+async function createBookmark() {
+  bookmarkError.value = ''
+  try {
+    const segment = (preview.value.segments || [])[bookmarkForm.value.segment_index]
+    await api.createBookmark(reportId.value, { ...bookmarkForm.value, sample_rate: segment?.sample_rate ?? null })
+    bookmarkForm.value.note = ''
+    await loadBookmarks()
+  } catch (error) { bookmarkError.value = parseError(error) }
+}
+async function jumpToBookmark(bookmark) {
+  bookmarkError.value = ''
+  try {
+    // The locate call re-validates the frozen source; invalidated sources
+    // surface their explicit error here instead of jumping anywhere.
+    const location = await api.locateBookmark(bookmark.id)
+    waveformFocus.value = { ...location, nonce: Date.now() }
+  } catch (error) { bookmarkError.value = parseError(error) }
+}
+async function removeBookmark(bookmark) {
+  bookmarkError.value = ''
+  try { await api.deleteBookmark(bookmark.id) } catch (error) { bookmarkError.value = parseError(error) }
+  await loadBookmarks()
 }
 async function createTask() {
   await api.createTask(selectedId.value, selectedCalibrationId.value)
@@ -220,7 +329,7 @@ const GapChart = {
 }
 
 const WaveformChart = {
-  props: ['preview'],
+  props: ['preview', 'bookmarks', 'focus'],
   setup(props) {
     const el = ref(null)
     let chart
@@ -230,14 +339,22 @@ const WaveformChart = {
       const series = []
       const axes = []
       ;(props.preview.segments || []).forEach((segment, segmentIndex) => {
-        segment.series.forEach((entry) => {
+        const marks = (props.bookmarks || []).filter((b) => b.segment_index === segmentIndex)
+        segment.series.forEach((entry, entryIndex) => {
           series.push({
             type: 'line',
             name: `${entry.channel} @${segment.sample_rate}Hz`,
             showSymbol: false,
             sampling: 'lttb',
             data: entry.values.map((value, index) => [segment.start_seconds + segment.times[index], value]),
-            xAxisIndex: segmentIndex
+            xAxisIndex: segmentIndex,
+            markLine: entryIndex === 0 && marks.length ? {
+              symbol: 'none',
+              animation: false,
+              label: { formatter: '{b}', fontSize: 10 },
+              lineStyle: { type: 'dashed', color: '#b4234a' },
+              data: marks.map((b) => ({ name: `${b.bookmark_type}:${b.channel}`, xAxis: b.display_seconds }))
+            } : undefined
           })
         })
         axes.push({ type: 'value', gridIndex: segmentIndex, name: 's', min: segment.start_seconds, max: segment.end_seconds })
@@ -252,7 +369,21 @@ const WaveformChart = {
         series
       }, true)
     }
-    watch(() => props.preview, render, { deep: true })
+    watch(() => [props.preview, props.bookmarks], render, { deep: true })
+    watch(() => props.focus, (focus) => {
+      if (!focus || !chart) return
+      const segment = (props.preview.segments || [])[focus.segment_index]
+      if (!segment) return
+      const span = segment.end_seconds - segment.start_seconds
+      const half = Math.max(span * 0.05, 5 / segment.sample_rate)
+      chart.dispatchAction({
+        type: 'dataZoom',
+        dataZoomIndex: focus.segment_index,
+        startValue: Math.max(segment.start_seconds, focus.display_seconds - half),
+        endValue: Math.min(segment.end_seconds, focus.display_seconds + half)
+      })
+      el.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
     const resize = () => chart?.resize()
     onMounted(() => { render(); window.addEventListener('resize', resize) })
     onUnmounted(() => window.removeEventListener('resize', resize))
